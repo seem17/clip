@@ -31,6 +31,10 @@ public struct ClipboardListView: View {
                     }
                 } else {
                     LazyVStack(spacing: 6) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id("LIST_TOP")
+
                         ForEach(clipboardManager.items) { item in
                             ClipboardRowView(
                                 item: item,
@@ -45,6 +49,12 @@ public struct ClipboardListView: View {
                     }
                     .padding(8)
                 }
+            }
+            .onAppear {
+                proxy.scrollTo("LIST_TOP", anchor: .top)
+            }
+            .onChange(of: clipboardManager.openTrigger) { _ in
+                proxy.scrollTo("LIST_TOP", anchor: .top)
             }
             .onChange(of: clipboardManager.selectedItemID) { newID in
                 if let newID = newID {
@@ -74,9 +84,7 @@ public struct ClipboardListView: View {
             .hidden()
         }
         .onAppear {
-            if clipboardManager.selectedItemID == nil || !clipboardManager.items.contains(where: { $0.id == clipboardManager.selectedItemID }) {
-                clipboardManager.selectedItemID = clipboardManager.items.first?.id
-            }
+            clipboardManager.resetSelectionForOpen()
         }
     }
 }

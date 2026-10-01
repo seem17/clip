@@ -14,6 +14,19 @@ public final class ClipboardManager: ObservableObject {
         return ClipSettings.shared.historyLimit
     }
 
+    @Published public var openTrigger: Int = 0
+
+    public func resetSelectionForOpen() {
+        if items.count > 1 {
+            selectedItemID = items[1].id
+        } else if let first = items.first {
+            selectedItemID = first.id
+        } else {
+            selectedItemID = nil
+        }
+        openTrigger += 1
+    }
+
     public func enforceLimit() {
         pruneToMaxLimit()
         persistItems()

@@ -188,10 +188,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self.previouslyActiveApp = frontmost
         }
 
-        // Ensure valid selection
-        if clipboardManager.selectedItemID == nil || !clipboardManager.items.contains(where: { $0.id == clipboardManager.selectedItemID }) {
-            clipboardManager.selectedItemID = clipboardManager.items.first?.id
-        }
+        // Always reset selection to second item and scroll to top on open
+        clipboardManager.resetSelectionForOpen()
 
         panel?.showPanel()
     }
