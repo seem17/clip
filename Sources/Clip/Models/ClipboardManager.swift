@@ -164,11 +164,15 @@ public final class ClipboardManager: ObservableObject {
             }
         }
 
-        // 1. Check for File URLs (before images: Finder also puts the file's icon on the pasteboard)
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [
+        let fileURL = (pasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
-        ]) as? [URL], let firstURL = fileURLs.first {
-            handleFileURLCopy(firstURL)
+        ]) as? [URL])?.first
+
+        // 1. Check for File URLs (before images: Finder also puts the file's icon on the pasteboard).
+        // Temp/cache files are skipped here: screenshot tools pair real image data with a
+        // throwaway file that may be deleted later, so the image bytes are the thing to keep.
+        if let fileURL = fileURL, !isTemporaryLocation(fileURL) {
+            handleFileURLCopy(fileURL)
             return
         }
 
@@ -178,13 +182,31 @@ public final class ClipboardManager: ObservableObject {
             return
         }
 
-        // 3. Check for String / Rich Text
+        // 3. Temp/cache file with no image data alongside it
+        if let fileURL = fileURL {
+            handleFileURLCopy(fileURL)
+            return
+        }
+
+        // 4. Check for String / Rich Text
         if let string = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
             let rtfData = pasteboard.data(forType: .rtf)
             let htmlData = pasteboard.data(forType: .html)
             handleStringCopy(string, rtfData: rtfData, htmlData: htmlData)
             return
         }
+    }
+
+    private func isTemporaryLocation(_ url: URL) -> Bool {
+        // Resolve symlinks so /var/folders and /private/var/folders compare equal
+        let path = url.resolvingSymlinksInPath().path
+        var roots = [
+            URL(fileURLWithPath: NSTemporaryDirectory()),
+            URL(fileURLWithPath: "/private/tmp"),
+            URL(fileURLWithPath: "/private/var/folders")
+        ]
+        roots += fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
+        return roots.contains { path.hasPrefix($0.resolvingSymlinksInPath().path + "/") }
     }
 
     // MARK: - Handle Copy Types
