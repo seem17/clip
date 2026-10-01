@@ -164,17 +164,17 @@ public final class ClipboardManager: ObservableObject {
             }
         }
 
-        // 1. Check for Image
-        if let image = NSImage(pasteboard: pasteboard) {
-            handleImageCopy(image)
-            return
-        }
-
-        // 2. Check for File URLs
+        // 1. Check for File URLs (before images: Finder also puts the file's icon on the pasteboard)
         if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
         ]) as? [URL], let firstURL = fileURLs.first {
             handleFileURLCopy(firstURL)
+            return
+        }
+
+        // 2. Check for Image
+        if let image = NSImage(pasteboard: pasteboard) {
+            handleImageCopy(image)
             return
         }
 
@@ -333,8 +333,9 @@ public final class ClipboardManager: ObservableObject {
                 }
             }
         case .file:
-            if let fileStr = item.fileURLString, let url = URL(string: "file://" + fileStr) {
-                pasteboard.writeObjects([url as NSURL])
+            if let path = item.fileURLString {
+                // fileURLWithPath escapes spaces and non-ASCII; URL(string:) returns nil for them
+                pasteboard.writeObjects([URL(fileURLWithPath: path) as NSURL])
             }
         default:
             if let text = item.textValue {

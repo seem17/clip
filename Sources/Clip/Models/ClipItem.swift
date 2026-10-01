@@ -111,8 +111,8 @@ public struct ClipItem: Identifiable, Codable, Equatable {
             }
             return "Image"
         }
-        if let file = fileURLString, let url = URL(string: file) {
-            return url.lastPathComponent
+        if let path = fileURLString {
+            return URL(fileURLWithPath: path).lastPathComponent
         }
         return "Clipboard Item"
     }
@@ -132,10 +132,8 @@ public struct ClipItem: Identifiable, Codable, Equatable {
             }
             return "PNG Image"
         case .file:
-            if let file = fileURLString, let url = URL(string: file) {
-                return url.path
-            }
-            return "Local file"
+            // fileURLString holds a plain filesystem path, not a URL string
+            return fileURLString ?? "Local file"
         case .code:
             let lines = (textValue ?? "").components(separatedBy: .newlines).count
             let chars = (textValue ?? "").count
