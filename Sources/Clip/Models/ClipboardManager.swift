@@ -21,8 +21,9 @@ public final class ClipboardManager: ObservableObject {
 
     private let pasteboard = NSPasteboard.general
     private var lastChangeCount: Int = 0
-    private var isSelfCopy: Bool = false
     private var timer: Timer?
+    // Serial so saves land on disk in the order they were requested
+    private let persistQueue = DispatchQueue(label: "com.clip.persist", qos: .utility)
 
     private let fileManager = FileManager.default
     private let appSupportURL: URL
@@ -148,11 +149,6 @@ public final class ClipboardManager: ObservableObject {
         let currentCount = pasteboard.changeCount
         guard currentCount != lastChangeCount else { return }
         lastChangeCount = currentCount
-
-        if isSelfCopy {
-            isSelfCopy = false
-            return
-        }
 
         readPasteboard()
     }
@@ -326,7 +322,6 @@ public final class ClipboardManager: ObservableObject {
 
     // MARK: - Copy Item Back to Pasteboard
     public func copyToPasteboard(item: ClipItem) {
-        isSelfCopy = true
         pasteboard.clearContents()
 
         switch item.type {
@@ -353,6 +348,7 @@ public final class ClipboardManager: ObservableObject {
             }
         }
 
+        // Recording our own change count stops the monitor from re-capturing this write
         lastChangeCount = pasteboard.changeCount
 
         // Bump item to top of list as most recently used
@@ -401,14 +397,16 @@ public final class ClipboardManager: ObservableObject {
 
     // MARK: - Persistence
     private func persistItems() {
-        DispatchQueue.global(qos: .background).async { [weak self] in
-            guard let self = self else { return }
+        // Snapshot on the calling (main) thread; `items` must never be read from the persist queue
+        let snapshot = items
+        let url = storageFileURL
+        persistQueue.async {
             do {
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
                 encoder.outputFormatting = .prettyPrinted
-                let data = try encoder.encode(self.items)
-                try data.write(to: self.storageFileURL, options: .atomic)
+                let data = try encoder.encode(snapshot)
+                try data.write(to: url, options: .atomic)
             } catch {
                 print("Failed to save clipboard items: \(error)")
             }

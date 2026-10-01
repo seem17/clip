@@ -88,6 +88,7 @@ private struct ClipboardRowView: View {
     let onSelect: () -> Void
 
     @State private var isHovered: Bool = false
+    @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -168,8 +169,7 @@ private struct ClipboardRowView: View {
 
     @ViewBuilder
     private var imageThumbnail: some View {
-        if let url = ClipboardManager.shared.imageURL(for: item),
-           let nsImage = NSImage(contentsOf: url) {
+        if let nsImage = thumbnail ?? ThumbnailCache.cached(for: item) {
             Image(nsImage: nsImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -183,6 +183,48 @@ private struct ClipboardRowView: View {
             Image(systemName: "photo")
                 .foregroundColor(.secondary)
                 .frame(height: 36)
+                .task(id: item.imageFileName) {
+                    guard let url = ClipboardManager.shared.imageURL(for: item) else { return }
+                    let key = item.imageFileName ?? url.lastPathComponent
+                    thumbnail = await Task.detached(priority: .userInitiated) {
+                        ThumbnailCache.load(url: url, key: key)
+                    }.value
+                }
         }
+    }
+}
+
+// MARK: - Thumbnail Cache
+/// Downsampled row thumbnails, so the list never decodes full-resolution images.
+private enum ThumbnailCache {
+    private static let maxPixelSize = 320
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    static func cached(for item: ClipItem) -> NSImage? {
+        guard let key = item.imageFileName else { return nil }
+        return cache.object(forKey: key as NSString)
+    }
+
+    static func load(url: URL, key: String) -> NSImage? {
+        if let hit = cache.object(forKey: key as NSString) { return hit }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width / 2, height: cgImage.height / 2))
+        cache.setObject(image, forKey: key as NSString, cost: cgImage.bytesPerRow * cgImage.height)
+        return image
     }
 }
