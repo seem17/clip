@@ -184,11 +184,16 @@ private struct ClipboardRowView: View {
                 .foregroundColor(.secondary)
                 .frame(height: 36)
                 .task(id: item.imageFileName) {
-                    guard let url = ClipboardManager.shared.imageURL(for: item) else { return }
-                    let key = item.imageFileName ?? url.lastPathComponent
-                    thumbnail = await Task.detached(priority: .userInitiated) {
-                        ThumbnailCache.load(url: url, key: key)
+                    guard let key = item.imageFileName,
+                          let url = ClipboardManager.shared.imageURL(for: item) else { return }
+                    // Decode a CGImage off the main thread; wrap it in NSImage back here, since
+                    // NSImage's Sendable conformance needs macOS 14
+                    let decoded = await Task.detached(priority: .userInitiated) {
+                        ThumbnailCache.decode(url: url)
                     }.value
+                    if let decoded = decoded {
+                        thumbnail = ThumbnailCache.store(decoded, forKey: key)
+                    }
                 }
         }
     }
@@ -209,20 +214,19 @@ private enum ThumbnailCache {
         return cache.object(forKey: key as NSString)
     }
 
-    static func load(url: URL, key: String) -> NSImage? {
-        if let hit = cache.object(forKey: key as NSString) { return hit }
-
+    static func decode(url: URL) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
         ]
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
 
+    /// Returns the image directly so callers don't depend on the cache keeping it.
+    static func store(_ cgImage: CGImage, forKey key: String) -> NSImage {
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width / 2, height: cgImage.height / 2))
         cache.setObject(image, forKey: key as NSString, cost: cgImage.bytesPerRow * cgImage.height)
         return image
