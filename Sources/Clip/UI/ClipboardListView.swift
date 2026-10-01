@@ -118,13 +118,24 @@ private struct ClipboardRowView: View {
                     .lineLimit(1)
 
             case .file:
-                Image(systemName: "doc")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                Text(item.previewTitle)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
+                if item.isFileMissing {
+                    Image(systemName: "questionmark.folder")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text(item.previewTitle)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(.secondary)
+                        .strikethrough(true, color: .secondary.opacity(0.5))
+                        .lineLimit(1)
+                } else {
+                    Image(systemName: "doc")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text(item.previewTitle)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                }
 
             case .code:
                 Text(item.previewTitle)

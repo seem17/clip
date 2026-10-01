@@ -177,15 +177,19 @@ public final class ClipboardManager: ObservableObject {
             }
         }
 
-        let fileURL = (pasteboard.readObjects(forClasses: [NSURL.self], options: [
+        let fileURLs = (pasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
-        ]) as? [URL])?.first
+        ]) as? [URL]) ?? []
+        let fileURL = fileURLs.first
 
         // 1. Check for File URLs (before images: Finder also puts the file's icon on the pasteboard).
         // Temp/cache files are skipped here: screenshot tools pair real image data with a
         // throwaway file that may be deleted later, so the image bytes are the thing to keep.
         if let fileURL = fileURL, !isTemporaryLocation(fileURL) {
-            handleFileURLCopy(fileURL)
+            if isExceedingSizeLimit(urls: fileURLs) {
+                return
+            }
+            handleFileURLCopy(fileURL, allURLs: fileURLs)
             return
         }
 
@@ -197,7 +201,10 @@ public final class ClipboardManager: ObservableObject {
 
         // 3. Temp/cache file with no image data alongside it
         if let fileURL = fileURL {
-            handleFileURLCopy(fileURL)
+            if isExceedingSizeLimit(urls: fileURLs) {
+                return
+            }
+            handleFileURLCopy(fileURL, allURLs: fileURLs)
             return
         }
 
@@ -272,7 +279,68 @@ public final class ClipboardManager: ObservableObject {
         }
     }
 
-    private func handleFileURLCopy(_ url: URL) {
+    // MARK: - File/Folder Size Limit (100MB)
+    public static let maxFileSizeLimitBytes: Int64 = 100 * 1024 * 1024 // 100 MB
+
+    /// Calculates the size of a file or folder on disk, exiting early once limitBytes is reached.
+    public func calculateSize(at url: URL, limitBytes: Int64) -> Int64 {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return 0
+        }
+
+        if !isDirectory.boolValue {
+            let attrs = try? fileManager.attributesOfItem(atPath: url.path)
+            return (attrs?[.size] as? Int64) ?? 0
+        }
+
+        // Folder size calculation: recursively accumulate regular file sizes
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: []
+        ) else {
+            return 0
+        }
+
+        var folderSize: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true,
+                  let size = values.fileSize else {
+                continue
+            }
+            folderSize += Int64(size)
+            if folderSize > limitBytes {
+                return folderSize
+            }
+        }
+        return folderSize
+    }
+
+    /// Checks if any single item or the total size of copied files/folders exceeds 100MB.
+    public func isExceedingSizeLimit(urls: [URL]) -> Bool {
+        var totalSize: Int64 = 0
+        for url in urls {
+            let remaining = Self.maxFileSizeLimitBytes - totalSize
+            let size = calculateSize(at: url, limitBytes: max(remaining, 0))
+            if size > Self.maxFileSizeLimitBytes {
+                return true
+            }
+            totalSize += size
+            if totalSize > Self.maxFileSizeLimitBytes {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func handleFileURLCopy(_ url: URL, allURLs: [URL] = []) {
+        let urlsToCheck = allURLs.isEmpty ? [url] : allURLs
+        if isExceedingSizeLimit(urls: urlsToCheck) {
+            return
+        }
+
         let path = url.path
         if let existingIndex = items.firstIndex(where: { $0.fileURLString == path }) {
             var existing = items[existingIndex]
@@ -369,8 +437,14 @@ public final class ClipboardManager: ObservableObject {
             }
         case .file:
             if let path = item.fileURLString {
-                // fileURLWithPath escapes spaces and non-ASCII; URL(string:) returns nil for them
-                pasteboard.writeObjects([URL(fileURLWithPath: path) as NSURL])
+                if fileManager.fileExists(atPath: path) {
+                    // fileURLWithPath escapes spaces and non-ASCII; URL(string:) returns nil for them
+                    pasteboard.writeObjects([URL(fileURLWithPath: path) as NSURL])
+                } else {
+                    // File was deleted: fall back to writing the filename as plain text
+                    let fallback = item.textValue ?? URL(fileURLWithPath: path).lastPathComponent
+                    pasteboard.setString(fallback, forType: .string)
+                }
             }
         default:
             if let text = item.textValue {

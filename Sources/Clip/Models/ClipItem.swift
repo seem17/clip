@@ -117,6 +117,11 @@ public struct ClipItem: Identifiable, Codable, Equatable {
         return "Clipboard Item"
     }
 
+    public var isFileMissing: Bool {
+        guard type == .file, let path = fileURLString else { return false }
+        return !FileManager.default.fileExists(atPath: path)
+    }
+
     public var previewSubtitle: String {
         switch type {
         case .link:
