@@ -29,8 +29,8 @@ if [ -f "Sources/Clip/Resources/AppIcon.icns" ]; then
     cp Sources/Clip/Resources/AppIcon.icns "${RESOURCES}/AppIcon.icns"
 fi
 
-echo "🔏 Signing ${APP_NAME}.app ad-hoc..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+echo "🔏 Signing ${APP_NAME}.app with stable identifier..."
+codesign --force --deep --sign - --identifier "com.clip.app" -r="designated => identifier \"com.clip.app\"" "$APP_BUNDLE"
 
 echo "✅ Successfully built ${APP_BUNDLE}!"
 

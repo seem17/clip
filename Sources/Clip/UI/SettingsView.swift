@@ -7,11 +7,11 @@ public struct SettingsView: View {
     @ObservedObject var clipboardManager = ClipboardManager.shared
 
     @State private var showingClearConfirmation = false
+    @State private var isAccessibilityGranted: Bool = PasteHelper.isAccessibilityGranted
     @Environment(\.colorScheme) var colorScheme
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Header
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -58,22 +58,34 @@ public struct SettingsView: View {
                                 .toggleStyle(.switch)
                         }
 
-                        if settings.autoPaste && !PasteHelper.isAccessibilityGranted {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.orange)
-                                    .font(.system(size: 12))
-                                Text("Accessibility permission needed for auto-paste")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Button("Open Settings") {
-                                    let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-                                    NSWorkspace.shared.open(url)
+                        if settings.autoPaste {
+                            if isAccessibilityGranted {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                        .font(.system(size: 12))
+                                    Text("Accessibility permission granted • Auto-paste active")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.green)
+                                    Spacer()
                                 }
-                                .font(.system(size: 11))
+                                .padding(.top, 2)
+                            } else {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                        .font(.system(size: 12))
+                                    Text("Permission needed: toggle Clip in System Settings")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Button("Grant Access") {
+                                        PasteHelper.promptForAccessibility()
+                                    }
+                                    .font(.system(size: 11))
+                                }
+                                .padding(.top, 2)
                             }
-                            .padding(.top, 4)
                         }
 
                         Divider()
@@ -242,6 +254,12 @@ public struct SettingsView: View {
             .background(Color.black.opacity(colorScheme == .dark ? 0.2 : 0.05))
         }
         .frame(width: 520, height: 540)
+        .onAppear {
+            isAccessibilityGranted = PasteHelper.isAccessibilityGranted
+        }
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+            isAccessibilityGranted = PasteHelper.isAccessibilityGranted
+        }
         .confirmationDialog(
             "Clear all clipboard history?",
             isPresented: $showingClearConfirmation,

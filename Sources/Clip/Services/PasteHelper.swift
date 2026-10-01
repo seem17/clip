@@ -18,8 +18,8 @@ public struct PasteHelper {
         // Simulate Cmd+V only if autoPaste is enabled
         guard ClipSettings.shared.autoPaste else { return }
 
-        // Simulate Cmd+V after slight delay to allow focus transition
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        // Delay to allow frontmost app to regain window server key focus
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             simulateCmdV()
         }
     }
@@ -38,11 +38,20 @@ public struct PasteHelper {
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
 
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        // Post single keystroke to session event tap
+        keyDown.post(tap: .cgSessionEventTap)
+        keyUp.post(tap: .cgSessionEventTap)
     }
 
     public static var isAccessibilityGranted: Bool {
         return AXIsProcessTrusted()
+    }
+
+    public static func promptForAccessibility() {
+        let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        _ = AXIsProcessTrustedWithOptions(options)
+
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
     }
 }
