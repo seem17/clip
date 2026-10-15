@@ -30,42 +30,64 @@ public struct ClipboardListView: View {
                             .padding(.vertical, 40)
                     }
                 } else {
-                    LazyVStack(spacing: 6) {
+                    VStack(spacing: 0) {
                         Color.clear
                             .frame(height: 0)
-                            .id("LIST_TOP")
+                            .id("SCROLL_TOP")
 
-                        ForEach(clipboardManager.items) { item in
-                            ClipboardRowView(
-                                item: item,
-                                isSelected: clipboardManager.selectedItemID == item.id,
-                                onSelect: {
-                                    clipboardManager.selectedItemID = item.id
-                                    onPasteItem(item)
-                                }
-                            )
-                            .id(item.id)
+                        LazyVStack(spacing: 6) {
+                            ForEach(clipboardManager.items) { item in
+                                ClipboardRowView(
+                                    item: item,
+                                    isSelected: clipboardManager.selectedItemID == item.id,
+                                    onSelect: {
+                                        clipboardManager.selectedItemID = item.id
+                                        onPasteItem(item)
+                                    }
+                                )
+                                .id(item.id)
+                            }
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)
                     }
-                    .padding(8)
                 }
             }
             .onAppear {
-                proxy.scrollTo("LIST_TOP", anchor: .top)
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo("SCROLL_TOP", anchor: .top)
+                }
             }
             .onChange(of: clipboardManager.openTrigger) { _ in
-                proxy.scrollTo("LIST_TOP", anchor: .top)
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo("SCROLL_TOP", anchor: .top)
+                }
             }
             .onChange(of: clipboardManager.selectedItemID) { newID in
-                if let newID = newID {
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        proxy.scrollTo(newID, anchor: .center)
+                guard let newID = newID else { return }
+                if let index = clipboardManager.items.firstIndex(where: { $0.id == newID }) {
+                    if index <= 1 {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo("SCROLL_TOP", anchor: .top)
+                        }
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            proxy.scrollTo(newID)
+                        }
                     }
                 }
             }
         }
         .frame(width: settings.windowWidth, height: settings.windowHeight)
         .liquidGlassContainer(cornerRadius: 16)
+        .preferredColorScheme(settings.appearanceMode == .dark ? .dark : (settings.appearanceMode == .light ? .light : nil))
         .background {
             // Invisible shortcuts
             Button("") { onDismiss() }
@@ -82,6 +104,26 @@ public struct ClipboardListView: View {
             }
             .keyboardShortcut(.return, modifiers: [])
             .hidden()
+
+            Button("") {
+                if let selectedID = clipboardManager.selectedItemID {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        clipboardManager.deleteItem(withID: selectedID)
+                    }
+                }
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+            .hidden()
+
+            Button("") {
+                if let selectedID = clipboardManager.selectedItemID {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        clipboardManager.deleteItem(withID: selectedID)
+                    }
+                }
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .hidden()
         }
         .onAppear {
             clipboardManager.resetSelectionForOpen()
@@ -96,6 +138,7 @@ private struct ClipboardRowView: View {
     let onSelect: () -> Void
 
     @State private var isHovered: Bool = false
+    @State private var isDeleteHovered: Bool = false
     @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
 
@@ -110,7 +153,7 @@ private struct ClipboardRowView: View {
                     Circle()
                         .fill(Color(nsColor: hexColor))
                         .frame(width: 14, height: 14)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                        .overlay(Circle().strokeBorder(colorScheme == .dark ? Color.white.opacity(0.3) : Color.black.opacity(0.2), lineWidth: 1))
                 }
                 Text(item.textValue ?? "")
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
@@ -156,33 +199,52 @@ private struct ClipboardRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, item.type == .image ? 6 : 8)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.25 : 0.20)
-                        : (isHovered
-                           ? Color.white.opacity(colorScheme == .dark ? 0.08 : 0.15)
-                           : Color.white.opacity(colorScheme == .dark ? 0.03 : 0.06))
-                )
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    isSelected
-                        ? Color.accentColor.opacity(0.6)
-                        : (isHovered
-                           ? Color.white.opacity(colorScheme == .dark ? 0.20 : 0.28)
-                           : Color.white.opacity(colorScheme == .dark ? 0.08 : 0.12)),
-                    lineWidth: 1
-                )
-        }
         .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect()
+        }
+        .overlay(alignment: .trailing) {
+            if isHovered {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        ClipboardManager.shared.deleteItem(withID: item.id)
+                    }
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(isDeleteHovered ? .white : .secondary)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            Circle()
+                                .fill(isDeleteHovered
+                                    ? Color.red.opacity(0.85)
+                                    : (colorScheme == .dark ? Color(white: 0.22, opacity: 0.95) : Color(white: 0.92, opacity: 0.95)))
+                        )
+                        .overlay(
+                            Circle()
+                                .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12), lineWidth: 0.5)
+                        )
+                        .shadow(color: Color.black.opacity(0.25), radius: 3, x: 0, y: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 8)
+                .help("Delete item (⌫)")
+                .transition(.opacity)
+                .onHover { isDeleteHovered = $0 }
+            }
+        }
+        .liquidGlassCard(isSelected: isSelected, isHovered: isHovered, cornerRadius: 10)
         .onHover { hovering in
             isHovered = hovering
         }
-        .onTapGesture {
-            onSelect()
+        .contextMenu {
+            Button(role: .destructive) {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    ClipboardManager.shared.deleteItem(withID: item.id)
+                }
+            } label: {
+                Label("Delete Item", systemImage: "trash")
+            }
         }
     }
 
@@ -196,7 +258,7 @@ private struct ClipboardRowView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
+                        .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.10), lineWidth: 0.5)
                 )
         } else {
             Image(systemName: "photo")

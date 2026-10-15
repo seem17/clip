@@ -136,6 +136,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let currentIndex = items.firstIndex { $0.id == self.clipboardManager.selectedItemID } ?? 0
             let newIndex = max(0, min(items.count - 1, currentIndex + delta))
             self.clipboardManager.selectedItemID = items[newIndex].id
+            if newIndex <= 1 {
+                self.resetScrollToTop()
+            }
         }
 
         floatingPanel.onConfirmSelection = { [weak self] in
@@ -152,10 +155,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hidePanel()
         }
 
+        floatingPanel.onDeleteSelection = { [weak self] in
+            guard let self = self else { return }
+            if let selectedID = self.clipboardManager.selectedItemID {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    self.clipboardManager.deleteItem(withID: selectedID)
+                }
+            }
+        }
+
+        floatingPanel.updateAppearance(mode: settings.appearanceMode)
+
+        settings.$appearanceMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak floatingPanel] mode in
+                floatingPanel?.updateAppearance(mode: mode)
+            }
+            .store(in: &cancellables)
+
         settings.$windowWidth.combineLatest(settings.$windowHeight)
             .receive(on: DispatchQueue.main)
             .sink { [weak floatingPanel] width, height in
                 floatingPanel?.setContentSize(NSSize(width: width, height: height))
+                floatingPanel?.invalidateShadow()
             }
             .store(in: &cancellables)
 
@@ -190,12 +212,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Always reset selection to second item and scroll to top on open
         clipboardManager.resetSelectionForOpen()
+        resetScrollToTop()
 
         panel?.showPanel()
     }
 
     public func hidePanel() {
         panel?.hidePanel()
+    }
+
+    private func resetScrollToTop() {
+        guard let panel = panel, let contentView = panel.contentView else { return }
+        if let scrollView = findScrollView(in: contentView) {
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    private func findScrollView(in view: NSView) -> NSScrollView? {
+        if let sv = view as? NSScrollView { return sv }
+        for subview in view.subviews {
+            if let sv = findScrollView(in: subview) { return sv }
+        }
+        return nil
     }
 
     private func pasteAndDismiss(item: ClipItem) {

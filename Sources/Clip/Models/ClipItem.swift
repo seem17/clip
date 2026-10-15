@@ -53,6 +53,7 @@ public struct ClipItem: Identifiable, Codable, Equatable {
     public var imageFileName: String?
     public var imageWidth: CGFloat?
     public var imageHeight: CGFloat?
+    public var imageHash: String?
     public var fileURLString: String?
     public var isPinned: Bool
 
@@ -66,6 +67,7 @@ public struct ClipItem: Identifiable, Codable, Equatable {
         imageFileName: String? = nil,
         imageWidth: CGFloat? = nil,
         imageHeight: CGFloat? = nil,
+        imageHash: String? = nil,
         fileURLString: String? = nil,
         isPinned: Bool = false
     ) {
@@ -78,6 +80,7 @@ public struct ClipItem: Identifiable, Codable, Equatable {
         self.imageFileName = imageFileName
         self.imageWidth = imageWidth
         self.imageHeight = imageHeight
+        self.imageHash = imageHash
         self.fileURLString = fileURLString
         self.isPinned = isPinned
     }
@@ -153,6 +156,38 @@ public struct ClipItem: Identifiable, Codable, Equatable {
     public var detectedHexColor: NSColor? {
         guard type == .color, let text = textValue?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
         return NSColor(hex: text)
+    }
+
+    /// Normalized signature used to detect duplicate content across clipboard items
+    public var uniquenessSignature: String {
+        switch type {
+        case .image:
+            if let hash = imageHash {
+                return "image:\(hash)"
+            }
+            if let fileName = imageFileName {
+                return "image:\(fileName)"
+            }
+            return "image:\(id.uuidString)"
+
+        case .file:
+            if let path = fileURLString {
+                let standardized = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+                return "file:\(standardized)"
+            }
+            return "file:\(textValue ?? "")"
+
+        case .text, .code, .link, .color:
+            if let text = textValue {
+                let normalized = text
+                    .replacingOccurrences(of: "\r\n", with: "\n")
+                    .replacingOccurrences(of: "\r", with: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .precomposedStringWithCanonicalMapping
+                return "text:\(normalized)"
+            }
+            return "text:\(id.uuidString)"
+        }
     }
 }
 

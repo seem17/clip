@@ -14,6 +14,21 @@ public final class ClipSettings: ObservableObject {
     private let kPreviewLines = "clip_previewLines"
     private let kWindowWidth = "clip_windowWidth"
     private let kWindowHeight = "clip_windowHeight"
+    private let kAppearanceMode = "clip_appearanceMode"
+
+    public enum AppearanceMode: String, CaseIterable, Identifiable {
+        case system = "System"
+        case dark = "Dark"
+        case light = "Light"
+
+        public var id: String { rawValue }
+    }
+
+    @Published public var appearanceMode: AppearanceMode {
+        didSet {
+            defaults.set(appearanceMode.rawValue, forKey: kAppearanceMode)
+        }
+    }
 
     @Published public var historyLimit: Int {
         didSet {
@@ -53,6 +68,12 @@ public final class ClipSettings: ObservableObject {
     }
 
     private init() {
+        if let savedAppearance = defaults.string(forKey: kAppearanceMode),
+           let mode = AppearanceMode(rawValue: savedAppearance) {
+            self.appearanceMode = mode
+        } else {
+            self.appearanceMode = .system
+        }
         self.historyLimit = defaults.object(forKey: kHistoryLimit) != nil ? defaults.integer(forKey: kHistoryLimit) : 30
         self.autoPaste = defaults.object(forKey: kAutoPaste) != nil ? defaults.bool(forKey: kAutoPaste) : true
         self.playSounds = defaults.object(forKey: kPlaySounds) != nil ? defaults.bool(forKey: kPlaySounds) : false
@@ -64,6 +85,7 @@ public final class ClipSettings: ObservableObject {
     }
 
     public func resetToDefaults() {
+        self.appearanceMode = .system
         self.historyLimit = 30
         self.autoPaste = true
         self.playSounds = false

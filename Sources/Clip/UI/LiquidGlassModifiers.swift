@@ -8,7 +8,7 @@ public struct VisualEffectView: NSViewRepresentable {
     public var state: NSVisualEffectView.State
 
     public init(
-        material: NSVisualEffectView.Material = .hudWindow,
+        material: NSVisualEffectView.Material = .popover,
         blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
         state: NSVisualEffectView.State = .active
     ) {
@@ -36,7 +36,7 @@ public struct VisualEffectView: NSViewRepresentable {
 public struct LiquidGlassCardModifier: ViewModifier {
     var isSelected: Bool
     var isHovered: Bool
-    var cornerRadius: CGFloat = 14
+    var cornerRadius: CGFloat = 10
 
     @Environment(\.colorScheme) var colorScheme
 
@@ -46,10 +46,10 @@ public struct LiquidGlassCardModifier: ViewModifier {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
                         isSelected
-                            ? Color.accentColor.opacity(colorScheme == .dark ? 0.22 : 0.16)
+                            ? Color.accentColor.opacity(colorScheme == .dark ? 0.30 : 0.22)
                             : (isHovered
-                               ? Color.white.opacity(colorScheme == .dark ? 0.10 : 0.25)
-                               : Color.white.opacity(colorScheme == .dark ? 0.05 : 0.15))
+                               ? (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                               : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03)))
                     )
             }
             .overlay {
@@ -58,77 +58,90 @@ public struct LiquidGlassCardModifier: ViewModifier {
                         isSelected
                             ? LinearGradient(
                                 colors: [
-                                    Color.accentColor.opacity(0.8),
-                                    Color.accentColor.opacity(0.3)
+                                    Color.accentColor.opacity(0.85),
+                                    Color.accentColor.opacity(0.40)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
-                            : LinearGradient(
-                                colors: [
-                                    Color.white.opacity(isHovered ? 0.35 : 0.18),
-                                    Color.white.opacity(isHovered ? 0.12 : 0.04)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
+                            : (isHovered
+                               ? LinearGradient(
+                                    colors: colorScheme == .dark
+                                        ? [Color.white.opacity(0.24), Color.white.opacity(0.10)]
+                                        : [Color.black.opacity(0.16), Color.black.opacity(0.08)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                 )
+                               : LinearGradient(
+                                    colors: colorScheme == .dark
+                                        ? [Color.white.opacity(0.12), Color.white.opacity(0.04)]
+                                        : [Color.black.opacity(0.10), Color.black.opacity(0.04)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                 )),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             }
-            .shadow(
-                color: isSelected
-                    ? Color.accentColor.opacity(0.25)
-                    : (isHovered ? Color.black.opacity(0.12) : Color.clear),
-                radius: isSelected ? 8 : 4,
-                x: 0,
-                y: isSelected ? 2 : 1
-            )
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
+            .animation(.easeInOut(duration: 0.12), value: isSelected)
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
     }
 }
 
 // MARK: - Liquid Glass Container
 public struct LiquidGlassContainerModifier: ViewModifier {
-    var cornerRadius: CGFloat = 22
+    var cornerRadius: CGFloat = 16
     @Environment(\.colorScheme) var colorScheme
 
     public func body(content: Content) -> some View {
         content
             .background {
-                VisualEffectView(
-                    material: .hudWindow,
-                    blendingMode: .behindWindow,
-                    state: .active
-                )
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                ZStack {
+                    VisualEffectView(
+                        material: .popover,
+                        blendingMode: .behindWindow,
+                        state: .active
+                    )
+
+                    // Protective tint: ensures rich depth and high contrast over white/light backgrounds
+                    // while maintaining native frosted glass translucency and blur.
+                    if colorScheme == .dark {
+                        Color(red: 0.11, green: 0.11, blue: 0.13).opacity(0.55)
+                    } else {
+                        Color.white.opacity(0.60)
+                    }
+                }
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.32 : 0.55),
-                                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.20),
-                                Color.white.opacity(colorScheme == .dark ? 0.16 : 0.35)
-                            ],
+                            colors: colorScheme == .dark
+                                ? [
+                                    Color.white.opacity(0.20),
+                                    Color.white.opacity(0.06),
+                                    Color.white.opacity(0.10)
+                                ]
+                                : [
+                                    Color.black.opacity(0.12),
+                                    Color.black.opacity(0.04),
+                                    Color.black.opacity(0.08)
+                                ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 1.2
+                        lineWidth: 1
                     )
             }
-            .shadow(color: Color.black.opacity(0.28), radius: 30, x: 0, y: 15)
-            .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 4)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 
 extension View {
-    public func liquidGlassCard(isSelected: Bool, isHovered: Bool, cornerRadius: CGFloat = 14) -> some View {
+    public func liquidGlassCard(isSelected: Bool, isHovered: Bool, cornerRadius: CGFloat = 10) -> some View {
         self.modifier(LiquidGlassCardModifier(isSelected: isSelected, isHovered: isHovered, cornerRadius: cornerRadius))
     }
 
-    public func liquidGlassContainer(cornerRadius: CGFloat = 22) -> some View {
+    public func liquidGlassContainer(cornerRadius: CGFloat = 16) -> some View {
         self.modifier(LiquidGlassContainerModifier(cornerRadius: cornerRadius))
     }
 }

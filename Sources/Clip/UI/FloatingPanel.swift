@@ -6,6 +6,7 @@ public final class FloatingPanel: NSPanel {
     private var globalEventMonitor: Any?
     public var onSelectionMove: ((Int) -> Void)?
     public var onConfirmSelection: (() -> Void)?
+    public var onDeleteSelection: (() -> Void)?
     public var onDismissRequested: (() -> Void)?
 
     public init(contentRect: NSRect) {
@@ -22,7 +23,7 @@ public final class FloatingPanel: NSPanel {
         self.isMovableByWindowBackground = true
         self.backgroundColor = .clear
         self.isOpaque = false
-        self.hasShadow = false
+        self.hasShadow = true
         self.animationBehavior = .utilityWindow
 
         setupKeyboardMonitoring()
@@ -36,17 +37,32 @@ public final class FloatingPanel: NSPanel {
         return true
     }
 
+    public func updateAppearance(mode: ClipSettings.AppearanceMode) {
+        switch mode {
+        case .system:
+            self.appearance = nil
+        case .dark:
+            self.appearance = NSAppearance(named: .darkAqua)
+        case .light:
+            self.appearance = NSAppearance(named: .aqua)
+        }
+        self.invalidateShadow()
+    }
+
     public func showPanel() {
         centerOnActiveScreen()
         self.alphaValue = 0
         self.makeKeyAndOrderFront(nil)
+        self.invalidateShadow()
         NSApp.activate(ignoringOtherApps: true)
 
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.16
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.animator().alphaValue = 1.0
-        }
+        }, completionHandler: { [weak self] in
+            self?.invalidateShadow()
+        })
 
         setupOutsideClickMonitor()
     }
@@ -93,6 +109,9 @@ public final class FloatingPanel: NSPanel {
                 return nil
             case 36, 76: // Return / Enter
                 self.onConfirmSelection?()
+                return nil
+            case 51, 117: // Backspace (51) / Forward Delete (117)
+                self.onDeleteSelection?()
                 return nil
             case 53:  // Escape
                 self.onDismissRequested?()

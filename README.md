@@ -33,6 +33,7 @@ When you press **`⇧⌘V` (Shift + Cmd + V)**, Clip opens **only** a clean, dis
 | **`↑` / `↓`** | Move selection up and down |
 | **`Return` / `Enter`** | Paste selected item into active application and close |
 | **Click** | Click any item to paste it directly |
+| **`⌫` (Delete)** / **`✕`** | Remove selected or hovered item from history |
 | **`Esc`** | Dismiss list |
 
 ---

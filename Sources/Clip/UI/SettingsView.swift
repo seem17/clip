@@ -139,6 +139,22 @@ public struct SettingsView: View {
 
                     // Section: Appearance
                     settingsSection(title: "Appearance") {
+                        // Appearance Theme
+                        settingRow(
+                            title: "Theme",
+                            subtitle: "Panel appearance style"
+                        ) {
+                            Picker("", selection: $settings.appearanceMode) {
+                                ForEach(ClipSettings.AppearanceMode.allCases) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 180)
+                        }
+
+                        Divider()
+
                         // Window Width
                         settingRow(
                             title: "Palette Width",
@@ -254,6 +270,7 @@ public struct SettingsView: View {
             .background(Color.black.opacity(colorScheme == .dark ? 0.2 : 0.05))
         }
         .frame(width: 520, height: 540)
+        .preferredColorScheme(settings.appearanceMode == .dark ? .dark : (settings.appearanceMode == .light ? .light : nil))
         .onAppear {
             isAccessibilityGranted = PasteHelper.isAccessibilityGranted
         }

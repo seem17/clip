@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import CryptoKit
 
 public final class ClipboardManager: ObservableObject {
     public static let shared = ClipboardManager()
@@ -232,14 +233,31 @@ public final class ClipboardManager: ObservableObject {
     // MARK: - Handle Copy Types
     private func handleStringCopy(_ text: String, rtfData: Data?, htmlData: Data?) {
         let type = detectStringType(text)
+        let normalizedIncoming = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
 
-        // Deduplication: check if already exists
-        if let existingIndex = items.firstIndex(where: { $0.textValue == text }) {
-            var existing = items[existingIndex]
+        // Deduplication: check if an equivalent text item already exists
+        if let existingIndex = items.firstIndex(where: { item in
+            guard let existingText = item.textValue else { return false }
+            let normalizedExisting = existingText
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .precomposedStringWithCanonicalMapping
+            return normalizedIncoming == normalizedExisting
+        }) {
+            // If already at the top of the list, do not re-add or duplicate
+            if existingIndex == 0 {
+                return
+            }
+
+            var existing = items.remove(at: existingIndex)
             existing.createdAt = Date()
             existing.rtfData = rtfData ?? existing.rtfData
             existing.htmlData = htmlData ?? existing.htmlData
-            items.remove(at: existingIndex)
             items.insert(existing, at: 0)
             persistItems()
             return
@@ -262,6 +280,37 @@ public final class ClipboardManager: ObservableObject {
             return
         }
 
+        let sha256 = SHA256.hash(data: pngData).map { String(format: "%02x", $0) }.joined()
+
+        // Deduplication: check if an identical image already exists in history
+        if let existingIndex = items.firstIndex(where: { item in
+            guard item.type == .image else { return false }
+            if let existingHash = item.imageHash, existingHash == sha256 {
+                return true
+            }
+            if let fileName = item.imageFileName {
+                let existingURL = imagesFolderURL.appendingPathComponent(fileName)
+                if let existingData = try? Data(contentsOf: existingURL) {
+                    let existingHash = SHA256.hash(data: existingData).map { String(format: "%02x", $0) }.joined()
+                    return existingHash == sha256
+                }
+            }
+            return false
+        }) {
+            if existingIndex == 0 {
+                return
+            }
+
+            var existing = items.remove(at: existingIndex)
+            existing.createdAt = Date()
+            if existing.imageHash == nil {
+                existing.imageHash = sha256
+            }
+            items.insert(existing, at: 0)
+            persistItems()
+            return
+        }
+
         let fileName = "\(UUID().uuidString).png"
         let fileURL = imagesFolderURL.appendingPathComponent(fileName)
 
@@ -271,7 +320,8 @@ public final class ClipboardManager: ObservableObject {
                 type: .image,
                 imageFileName: fileName,
                 imageWidth: image.size.width,
-                imageHeight: image.size.height
+                imageHeight: image.size.height,
+                imageHash: sha256
             )
             insertItem(newItem)
         } catch {
@@ -341,11 +391,17 @@ public final class ClipboardManager: ObservableObject {
             return
         }
 
-        let path = url.path
-        if let existingIndex = items.firstIndex(where: { $0.fileURLString == path }) {
-            var existing = items[existingIndex]
+        let standardizedPath = url.resolvingSymlinksInPath().standardizedFileURL.path
+        if let existingIndex = items.firstIndex(where: { item in
+            guard let existingPath = item.fileURLString else { return false }
+            return URL(fileURLWithPath: existingPath).resolvingSymlinksInPath().standardizedFileURL.path == standardizedPath
+        }) {
+            if existingIndex == 0 {
+                return
+            }
+
+            var existing = items.remove(at: existingIndex)
             existing.createdAt = Date()
-            items.remove(at: existingIndex)
             items.insert(existing, at: 0)
             persistItems()
             return
@@ -354,12 +410,15 @@ public final class ClipboardManager: ObservableObject {
         let newItem = ClipItem(
             type: .file,
             textValue: url.lastPathComponent,
-            fileURLString: path
+            fileURLString: standardizedPath
         )
         insertItem(newItem)
     }
 
     private func insertItem(_ item: ClipItem) {
+        let sig = item.uniquenessSignature
+        items.removeAll(where: { $0.uniquenessSignature == sig })
+
         items.insert(item, at: 0)
         pruneToMaxLimit()
         persistItems()
@@ -485,7 +544,13 @@ public final class ClipboardManager: ObservableObject {
             persistItems()
 
             if selectedItemID == itemID {
-                selectedItemID = items.first?.id
+                if index < items.count {
+                    selectedItemID = items[index].id
+                } else if !items.isEmpty {
+                    selectedItemID = items.last?.id
+                } else {
+                    selectedItemID = nil
+                }
             }
         }
     }
@@ -530,7 +595,19 @@ public final class ClipboardManager: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let loaded = try decoder.decode([ClipItem].self, from: data)
-            self.items = Array(loaded.prefix(maxItems))
+
+            // Deduplicate loaded items: keep only unique items by signature
+            var seen = Set<String>()
+            var unique: [ClipItem] = []
+            for item in loaded {
+                let sig = item.uniquenessSignature
+                if !seen.contains(sig) {
+                    seen.insert(sig)
+                    unique.append(item)
+                }
+            }
+
+            self.items = Array(unique.prefix(maxItems))
             self.selectedItemID = self.items.first?.id
         } catch {
             print("Failed to load clipboard items: \(error)")
