@@ -158,6 +158,21 @@ public struct ClipItem: Identifiable, Codable, Equatable {
         return NSColor(hex: text)
     }
 
+    /// Normalizes text for duplicate detection: unifies line endings, trims
+    /// surrounding whitespace, and canonicalizes Unicode composition.
+    public static func normalizedText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+    }
+
+    /// Signature that any text-bearing item (.text, .code, .link, .color) carries for `text`
+    public static func textSignature(for text: String) -> String {
+        "text:\(normalizedText(text))"
+    }
+
     /// Normalized signature used to detect duplicate content across clipboard items
     public var uniquenessSignature: String {
         switch type {
@@ -179,12 +194,7 @@ public struct ClipItem: Identifiable, Codable, Equatable {
 
         case .text, .code, .link, .color:
             if let text = textValue {
-                let normalized = text
-                    .replacingOccurrences(of: "\r\n", with: "\n")
-                    .replacingOccurrences(of: "\r", with: "\n")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .precomposedStringWithCanonicalMapping
-                return "text:\(normalized)"
+                return ClipItem.textSignature(for: text)
             }
             return "text:\(id.uuidString)"
         }

@@ -233,22 +233,11 @@ public final class ClipboardManager: ObservableObject {
     // MARK: - Handle Copy Types
     private func handleStringCopy(_ text: String, rtfData: Data?, htmlData: Data?) {
         let type = detectStringType(text)
-        let normalizedIncoming = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .precomposedStringWithCanonicalMapping
+        let incomingSignature = ClipItem.textSignature(for: text)
 
-        // Deduplication: check if an equivalent text item already exists
-        if let existingIndex = items.firstIndex(where: { item in
-            guard let existingText = item.textValue else { return false }
-            let normalizedExisting = existingText
-                .replacingOccurrences(of: "\r\n", with: "\n")
-                .replacingOccurrences(of: "\r", with: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .precomposedStringWithCanonicalMapping
-            return normalizedIncoming == normalizedExisting
-        }) {
+        // Deduplication: match on the item's own signature, which is namespaced by
+        // type, so a file item's name can never collide with copied text
+        if let existingIndex = items.firstIndex(where: { $0.uniquenessSignature == incomingSignature }) {
             // If already at the top of the list, do not re-add or duplicate
             if existingIndex == 0 {
                 return
