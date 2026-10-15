@@ -173,12 +173,17 @@ public struct ClipItem: Identifiable, Codable, Equatable {
         "text:\(normalizedText(text))"
     }
 
+    /// Signature an image item carries once its content hash is known
+    public static func imageSignature(forHash hash: String) -> String {
+        "image:\(hash)"
+    }
+
     /// Normalized signature used to detect duplicate content across clipboard items
     public var uniquenessSignature: String {
         switch type {
         case .image:
             if let hash = imageHash {
-                return "image:\(hash)"
+                return ClipItem.imageSignature(forHash: hash)
             }
             if let fileName = imageFileName {
                 return "image:\(fileName)"

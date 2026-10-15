@@ -38,6 +38,8 @@ public final class ClipboardManager: ObservableObject {
     private var timer: Timer?
     // Serial so saves land on disk in the order they were requested
     private let persistQueue = DispatchQueue(label: "com.clip.persist", qos: .utility)
+    // Keeps image file reads and hashing off the pasteboard poll timer
+    private let hashQueue = DispatchQueue(label: "com.clip.imagehash", qos: .utility)
 
     private let fileManager = FileManager.default
     private let appSupportURL: URL
@@ -92,6 +94,7 @@ public final class ClipboardManager: ObservableObject {
 
         setupStorage()
         loadPersistedItems()
+        backfillImageHashesIfNeeded()
         self.lastChangeCount = pasteboard.changeCount
 
         startMonitoring()
@@ -262,6 +265,10 @@ public final class ClipboardManager: ObservableObject {
         insertItem(newItem)
     }
 
+    private static func hexDigest(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     private func handleImageCopy(_ image: NSImage) {
         guard let tiffData = image.tiffRepresentation,
               let bitmapImage = NSBitmapImageRep(data: tiffData),
@@ -269,32 +276,19 @@ public final class ClipboardManager: ObservableObject {
             return
         }
 
-        let sha256 = SHA256.hash(data: pngData).map { String(format: "%02x", $0) }.joined()
+        let sha256 = Self.hexDigest(of: pngData)
+        let incomingSignature = ClipItem.imageSignature(forHash: sha256)
 
-        // Deduplication: check if an identical image already exists in history
-        if let existingIndex = items.firstIndex(where: { item in
-            guard item.type == .image else { return false }
-            if let existingHash = item.imageHash, existingHash == sha256 {
-                return true
-            }
-            if let fileName = item.imageFileName {
-                let existingURL = imagesFolderURL.appendingPathComponent(fileName)
-                if let existingData = try? Data(contentsOf: existingURL) {
-                    let existingHash = SHA256.hash(data: existingData).map { String(format: "%02x", $0) }.joined()
-                    return existingHash == sha256
-                }
-            }
-            return false
-        }) {
+        // Deduplication: compare stored hashes only. Reading and re-hashing every
+        // image here would put disk I/O on the pasteboard poll timer; hashes absent
+        // from older history are filled in once by backfillImageHashesIfNeeded().
+        if let existingIndex = items.firstIndex(where: { $0.uniquenessSignature == incomingSignature }) {
             if existingIndex == 0 {
                 return
             }
 
             var existing = items.remove(at: existingIndex)
             existing.createdAt = Date()
-            if existing.imageHash == nil {
-                existing.imageHash = sha256
-            }
             items.insert(existing, at: 0)
             persistItems()
             return
@@ -315,6 +309,44 @@ public final class ClipboardManager: ObservableObject {
             insertItem(newItem)
         } catch {
             print("Failed to save clipboard image: \(error)")
+        }
+    }
+
+    /// Fills in `imageHash` for images persisted before hashes were stored, so the
+    /// dedup check in `handleImageCopy` stays a pure in-memory comparison. Reads and
+    /// hashes off the main thread, then applies the results back on it. Runs once at
+    /// launch: every image saved since carries its hash from the start.
+    private func backfillImageHashesIfNeeded() {
+        let pending: [(id: UUID, fileName: String)] = items.compactMap { item in
+            guard item.type == .image, item.imageHash == nil,
+                  let fileName = item.imageFileName else { return nil }
+            return (item.id, fileName)
+        }
+        guard !pending.isEmpty else { return }
+
+        let folder = imagesFolderURL
+        hashQueue.async { [weak self] in
+            var hashes: [UUID: String] = [:]
+            for entry in pending {
+                guard let data = try? Data(contentsOf: folder.appendingPathComponent(entry.fileName)) else { continue }
+                hashes[entry.id] = Self.hexDigest(of: data)
+            }
+            guard !hashes.isEmpty else { return }
+
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                var updated = self.items
+                var changed = false
+                for index in updated.indices {
+                    guard updated[index].imageHash == nil,
+                          let hash = hashes[updated[index].id] else { continue }
+                    updated[index].imageHash = hash
+                    changed = true
+                }
+                guard changed else { return }
+                self.items = updated
+                self.persistItems()
+            }
         }
     }
 
@@ -405,10 +437,20 @@ public final class ClipboardManager: ObservableObject {
     }
 
     private func insertItem(_ item: ClipItem) {
+        var item = item
         let sig = item.uniquenessSignature
+        let superseded = items.filter { $0.uniquenessSignature == sig }
+
+        // A replacement inherits the pin, otherwise re-copying a pinned item unpins it
+        if superseded.contains(where: { $0.isPinned }) {
+            item.isPinned = true
+        }
         items.removeAll(where: { $0.uniquenessSignature == sig })
 
         items.insert(item, at: 0)
+        for old in superseded where old.imageFileName != item.imageFileName {
+            cleanUpImageFile(for: old)
+        }
         pruneToMaxLimit()
         persistItems()
         if selectedItemID == nil {
@@ -585,19 +627,39 @@ public final class ClipboardManager: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             let loaded = try decoder.decode([ClipItem].self, from: data)
 
-            // Deduplicate loaded items: keep only unique items by signature
-            var seen = Set<String>()
+            // Deduplicate loaded items, keeping the most recent of each signature.
+            // Signature normalization is broader than the exact matching used when
+            // these items were written, so history can hold near-duplicates whose
+            // pin sits on the older copy; carry it over rather than lose it.
+            var keptIndexBySignature: [String: Int] = [:]
             var unique: [ClipItem] = []
+            var dropped: [ClipItem] = []
             for item in loaded {
                 let sig = item.uniquenessSignature
-                if !seen.contains(sig) {
-                    seen.insert(sig)
+                if let keptIndex = keptIndexBySignature[sig] {
+                    if item.isPinned {
+                        unique[keptIndex].isPinned = true
+                    }
+                    dropped.append(item)
+                } else {
+                    keptIndexBySignature[sig] = unique.count
                     unique.append(item)
                 }
             }
 
-            self.items = Array(unique.prefix(maxItems))
+            let kept = Array(unique.prefix(maxItems))
+            dropped.append(contentsOf: unique.dropFirst(kept.count))
+
+            self.items = kept
             self.selectedItemID = self.items.first?.id
+
+            // Nothing references the dropped items' images any more
+            let stillReferenced = Set(kept.compactMap { $0.imageFileName })
+            for item in dropped {
+                guard let fileName = item.imageFileName,
+                      !stillReferenced.contains(fileName) else { continue }
+                cleanUpImageFile(for: item)
+            }
         } catch {
             print("Failed to load clipboard items: \(error)")
         }
